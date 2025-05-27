@@ -1,29 +1,25 @@
-// src/app/api/scan-receipt/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   const formData = await req.formData();
-  const file = formData.get("file") as File;
+  const file = formData.get('file') as File;
 
   if (!file) {
-    return NextResponse.json({ error: "No file uploaded" }, { status: 400 });
+    return NextResponse.json({ error: 'No file uploaded' }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const mindeeForm = new FormData();
+  mindeeForm.append('document', file);
 
-  const mindeeRes = await fetch("https://api.mindee.net/v1/products/mindee/expense_receipts/v5/predict", {
-    method: "POST",
+  const mindeeRes = await fetch('https://api.mindee.net/v1/products/mindee/expense_receipts/v5/predict', {
+    method: 'POST',
     headers: {
-      "Authorization": `Token ${process.env.MINDEE_API_KEY}`,
+      Authorization: `Token be6329d6214fe70beaf4d63823277b8e`,
     },
-    body: (() => {
-      const body = new FormData();
-      body.append("document", new Blob([buffer]), file.name);
-      return body;
-    })(),
+    body: mindeeForm,
   });
 
-  const json = await mindeeRes.json();
+  const result = await mindeeRes.json();
 
-  return NextResponse.json(json);
+  return NextResponse.json(result);
 }

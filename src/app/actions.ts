@@ -1,23 +1,22 @@
-'use server'
+'use server';
 
-import { createServerActionClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+export async function uploadReceipt(formData: FormData) {
+  const file = formData.get('file') as File;
 
-export async function uploadExpense(formData: FormData) {
-  const amount = formData.get('amount') as string
-  const category = formData.get('category') as string
-  const note = formData.get('note') as string
+  const buffer = await file.arrayBuffer();
+  const base64 = Buffer.from(buffer).toString('base64');
 
-  const supabase = createServerActionClient({ cookies })
+  const res = await fetch('https://api.mindee.net/v1/products/mindee/expense_receipts/v5/predict', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Token be6329d6214fe70beaf4d63823277b8e',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      document: base64,
+    }),
+  });
 
-  const { error } = await supabase.from('expenses').insert({
-    amount: parseFloat(amount),
-    category,
-    note,
-  })
-
-  if (error) {
-    console.error('Upload error:', error)
-    throw new Error('Failed to upload expense.')
-  }
+  const data = await res.json();
+  return data;
 }
