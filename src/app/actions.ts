@@ -1,55 +1,60 @@
 'use server';
 
-import { createServerAction } from 'zsa';
 import { createClient } from '@supabase/supabase-js';
 import { readFile } from 'fs/promises';
 import path from 'path';
+import { writeFile } from 'fs/promises';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export const scanReceipt = createServerAction(async (_input, formData) => {
-  const file: File | null = formData.get('file') as unknown as File;
+const MINDEE_API_KEY = process.env.MINDEE_API_KEY!;
 
-  if (!file) return { error: 'No file uploaded' };
+export async function scanReceipt(file: File) {
+  // Save file locally
+  const bytes = await file.arrayBuffer();
+  const buffer = Buffer.from(bytes);
+  const filename = `${Date.now()}-${file.name}`;
+  const filePath = path.join('/tmp', filename);
 
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+  await writeFile(filePath, buffer);
 
-  const response = await fetch(
-    'https://api.mindee.net/v1/products/mindee/expense_receipts/v5/predict',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Token ${process.env.MINDEE_API_KEY}`,
-      },
-      body: (() => {
-        const form = new FormData();
-        form.append('document', new Blob([buffer]), file.name);
-        return form;
-      })(),
-    }
-  );
+  // Upload to Supabase Storage
+  const { data: uploadData, error: uploadError } = await supabase.storage
+    .from('receipts')
+    .upload(filename, buffer, {
+      contentType: file.type,
+      upsert: true,
+    });
 
-  const data = await response.json();
-
-  const doc = data?.document?.inference?.prediction;
-
-  const receiptData = {
-    date: doc?.date?.value || null,
-    vendor: doc?.supplier?.value || null,
-    total: doc?.total_incl?.value || null,
-    tax: doc?.taxes?.[0]?.value || null,
-    category: doc?.category?.value || null,
-  };
-
-  const { error } = await supabase.from('receipts').insert(receiptData);
-
-  if (error) {
-    return { error: 'Failed to save to database' };
+  if (uploadError) {
+    console.error('Upload error:', uploadError);
+    throw new Error('Failed to upload file to Supabase.');
   }
 
-  return receiptData;
-});
+  // Send to Mindee
+  const mindeeRes = await fetch('https://api.mindee.net/v1/products/mindee/expense_receipts/v5/predict', {
+    method: 'POST',
+    headers: {
+      Authorization: `Token ${MINDEE_API_KEY}`,
+    },
+    body: (() => {
+      const form = new FormData();
+      form.append('document', buffer, file.name);
+      return form;
+    })(),
+  });
+
+  const json = await mindeeRes.json();
+  const doc = json?.document?.inference?.prediction;
+
+  return {
+    date: doc?.date?.value ?? 'N/A',
+    vendor: doc?.supplier?.value ?? 'N/A',
+    total: doc?.total_incl?.value ? `$${doc.total_incl.value}` : '$N/A',
+    tax: doc?.taxes?.[0]?.value ? `$${doc.taxes[0].value}` : '$N/A',
+    category: doc?.category?.value ?? 'miscellaneous',
+  };
+}
